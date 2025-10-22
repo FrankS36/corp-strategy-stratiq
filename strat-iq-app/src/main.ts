@@ -279,6 +279,19 @@ async function openProject(projectId: string) {
 async function renderProject(savedScenario: any = null) {
   const app = document.querySelector<HTMLDivElement>('#app')!;
 
+  // If no scenario passed, load the latest one from the project
+  if (!savedScenario && currentProject) {
+    const { data: latestScenario } = await supabase
+      .from('scenarios')
+      .select('*')
+      .eq('project_id', currentProject.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    savedScenario = latestScenario;
+  }
+
   // Prepare assumptions HTML
   const assumptionsHTML = assumptions.length > 0
     ? assumptions.map((a: any) => {
