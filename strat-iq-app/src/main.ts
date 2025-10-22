@@ -237,13 +237,88 @@ async function openProject(projectId: string) {
     .eq('id', projectId)
     .single();
 
+  // Load saved assumptions
+  const { data: savedAssumptions } = await supabase
+    .from('assumptions')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: true });
+
+  // Load saved challenges
+  const { data: savedChallenges } = await supabase
+    .from('challenges')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: true });
+
+  // Load saved scenarios
+  const { data: savedScenarios } = await supabase
+    .from('scenarios')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
   currentProject = project;
+  assumptions = savedAssumptions || [];
+  challenges = savedChallenges || [];
+
   currentView = 'project';
-  renderProject();
+  renderProject(savedScenarios?.[0] || null);
 }
 
-async function renderProject() {
+async function renderProject(savedScenario: any = null) {
   const app = document.querySelector<HTMLDivElement>('#app')!;
+
+  // Prepare assumptions HTML
+  const assumptionsHTML = assumptions.length > 0
+    ? assumptions.map((a: any) => `
+        <div class="border-l-4 border-${a.category === 'desirability' ? 'blue' : a.category === 'feasibility' ? 'green' : 'yellow'}-500 pl-3 py-2">
+          <p class="font-medium text-gray-800">${a.text}</p>
+          <div class="flex gap-4 text-xs text-gray-600 mt-1">
+            <span>Criticality: ${a.criticality}/5</span>
+            <span>Confidence: ${a.confidence}/5</span>
+          </div>
+        </div>
+      `).join('')
+    : 'Click "Extract Assumptions" to begin';
+
+  // Prepare challenges HTML
+  const challengesHTML = challenges.length > 0
+    ? `
+        <h4 class="font-semibold text-gray-800 mb-3">Critical Questions (${challenges.length})</h4>
+        <div class="space-y-3">
+          ${challenges.map((c: any, i: number) => `
+            <div class="border-l-4 border-purple-500 pl-3 py-2 bg-purple-50">
+              <p class="text-gray-800">${i + 1}. ${c.question}</p>
+            </div>
+          `).join('')}
+        </div>
+      `
+    : '';
+
+  // Prepare scenario HTML
+  const scenarioHTML = savedScenario
+    ? `
+        <h4 class="font-semibold text-gray-800 mb-3">Pre-Mortem: Failure Scenario</h4>
+        <div class="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
+          <p class="text-gray-800 whitespace-pre-wrap">${savedScenario.narrative}</p>
+        </div>
+
+        <h4 class="font-semibold text-gray-800 mb-3">Potential Failure Reasons</h4>
+        <ul class="space-y-2">
+          ${savedScenario.key_points.map((reason: string) => `
+            <li class="flex items-start">
+              <span class="text-red-500 mr-2">•</span>
+              <span class="text-gray-700">${reason}</span>
+            </li>
+          `).join('')}
+        </ul>
+      `
+    : '';
+
+  const hasResults = challengesHTML || scenarioHTML;
+
   app.innerHTML = `
     <div class="min-h-screen bg-gray-50">
       <header class="bg-white shadow-sm">
@@ -263,7 +338,7 @@ async function renderProject() {
               <h3 class="text-lg font-semibold mb-4">Analyze Strategy</h3>
               <div class="space-y-2">
                 <button id="extract-assumptions-btn" class="w-full bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition text-sm">
-                  Extract Assumptions
+                  ${assumptions.length > 0 ? 'Re-extract Assumptions' : 'Extract Assumptions'}
                 </button>
                 <button id="generate-challenges-btn" class="w-full bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition text-sm">
                   Devil's Advocate
@@ -275,9 +350,9 @@ async function renderProject() {
             </div>
 
             <div id="assumptions-panel" class="bg-white rounded-lg shadow p-6">
-              <h3 class="text-lg font-semibold mb-4">Assumptions</h3>
+              <h3 class="text-lg font-semibold mb-4">Assumptions ${assumptions.length > 0 ? `(${assumptions.length})` : ''}</h3>
               <div id="assumptions-list" class="space-y-2 text-sm text-gray-600">
-                Click "Extract Assumptions" to begin
+                ${assumptionsHTML}
               </div>
             </div>
           </div>
@@ -291,9 +366,13 @@ async function renderProject() {
               </div>
             </div>
 
-            <div id="analysis-results" class="bg-white rounded-lg shadow p-6 hidden">
+            <div id="analysis-results" class="bg-white rounded-lg shadow p-6 ${hasResults ? '' : 'hidden'}">
               <h3 class="text-lg font-semibold mb-4">Analysis Results</h3>
-              <div id="results-content"></div>
+              <div id="results-content">
+                ${challengesHTML}
+                ${challengesHTML && scenarioHTML ? '<div class="my-6 border-t border-gray-200"></div>' : ''}
+                ${scenarioHTML}
+              </div>
             </div>
           </div>
         </div>
@@ -324,19 +403,8 @@ async function extractAssumptionsHandler() {
 
     assumptions = extractedAssumptions;
 
-    // Update UI
-    const list = document.getElementById('assumptions-list');
-    if (list) {
-      list.innerHTML = extractedAssumptions.map((a: any, i: number) => `
-        <div class="border-l-4 border-${a.category === 'desirability' ? 'blue' : a.category === 'feasibility' ? 'green' : 'yellow'}-500 pl-3 py-2">
-          <p class="font-medium text-gray-800">${a.text}</p>
-          <div class="flex gap-4 text-xs text-gray-600 mt-1">
-            <span>Criticality: ${a.criticality}/5</span>
-            <span>Confidence: ${a.confidence}/5</span>
-          </div>
-        </div>
-      `).join('');
-    }
+    // Refresh the UI to show saved assumptions
+    renderProject();
   } catch (error) {
     console.error('Error:', error);
     alert('Error extracting assumptions. Make sure the backend server is running.');
@@ -355,25 +423,18 @@ async function generateChallengesHandler() {
       assumptions
     );
 
+    // Save to database
+    for (const challenge of generatedChallenges) {
+      await supabase.from('challenges').insert({
+        project_id: currentProject.id,
+        question: challenge.question
+      });
+    }
+
     challenges = generatedChallenges;
 
-    // Show results
-    const resultsDiv = document.getElementById('analysis-results');
-    const resultsContent = document.getElementById('results-content');
-
-    if (resultsDiv && resultsContent) {
-      resultsDiv.classList.remove('hidden');
-      resultsContent.innerHTML = `
-        <h4 class="font-semibold text-gray-800 mb-3">Critical Questions</h4>
-        <div class="space-y-3">
-          ${generatedChallenges.map((c: any, i: number) => `
-            <div class="border-l-4 border-purple-500 pl-3 py-2 bg-purple-50">
-              <p class="text-gray-800">${i + 1}. ${c.question}</p>
-            </div>
-          `).join('')}
-        </div>
-      `;
-    }
+    // Refresh the UI to show saved challenges
+    renderProject();
   } catch (error) {
     console.error('Error:', error);
     alert('Error generating challenges. Make sure the backend server is running.');
@@ -389,29 +450,18 @@ async function generatePreMortemHandler() {
   try {
     const preMortem = await api.generatePreMortem(currentProject.strategy_text, assumptions);
 
-    // Show results
-    const resultsDiv = document.getElementById('analysis-results');
-    const resultsContent = document.getElementById('results-content');
+    // Save to database
+    const savedScenario = {
+      project_id: currentProject.id,
+      type: 'pre-mortem',
+      narrative: preMortem.narrative,
+      key_points: preMortem.failure_reasons
+    };
 
-    if (resultsDiv && resultsContent) {
-      resultsDiv.classList.remove('hidden');
-      resultsContent.innerHTML = `
-        <h4 class="font-semibold text-gray-800 mb-3">Pre-Mortem: Failure Scenario</h4>
-        <div class="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
-          <p class="text-gray-800 whitespace-pre-wrap">${preMortem.narrative}</p>
-        </div>
+    await supabase.from('scenarios').insert(savedScenario);
 
-        <h4 class="font-semibold text-gray-800 mb-3">Potential Failure Reasons</h4>
-        <ul class="space-y-2">
-          ${preMortem.failure_reasons.map((reason: string) => `
-            <li class="flex items-start">
-              <span class="text-red-500 mr-2">•</span>
-              <span class="text-gray-700">${reason}</span>
-            </li>
-          `).join('')}
-        </ul>
-      `;
-    }
+    // Refresh the UI to show saved pre-mortem
+    renderProject(savedScenario);
   } catch (error) {
     console.error('Error:', error);
     alert('Error generating pre-mortem. Make sure the backend server is running.');
