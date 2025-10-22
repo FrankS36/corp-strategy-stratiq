@@ -29,11 +29,11 @@ export const api = {
     return response.json();
   },
 
-  async generateHypothesis(assumptionText: string, context: string) {
+  async generateHypothesis(assumptionText: string, strategyContext: string) {
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: 'hypothesis', assumptionText, context }),
+      body: JSON.stringify({ endpoint: 'hypothesis', assumptionText, strategyContext }),
     });
     return response.json();
   },
