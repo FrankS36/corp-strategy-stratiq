@@ -30,7 +30,7 @@ export const api = {
   },
 
   async generateHypothesis(assumptionText: string, context: string) {
-    const response = await fetch('/api', {
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: 'hypothesis', assumptionText, context }),
@@ -39,7 +39,7 @@ export const api = {
   },
 
   async chat(messages: any[], strategyContext: string) {
-    const response = await fetch('/api', {
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: 'chat', messages, strategyContext }),
