@@ -6,6 +6,7 @@ import { api } from './lib/api';
 let currentProject: any = null;
 let assumptions: any[] = [];
 let challenges: any[] = [];
+let hypotheses: any[] = [];
 let currentView: 'login' | 'dashboard' | 'project' = 'login';
 
 // Initialize app
@@ -259,9 +260,17 @@ async function openProject(projectId: string) {
     .order('created_at', { ascending: false })
     .limit(1);
 
+  // Load hypotheses (with their associated assumption)
+  const { data: savedHypotheses } = await supabase
+    .from('hypotheses')
+    .select('*, assumptions(*)')
+    .in('assumption_id', savedAssumptions?.map(a => a.id) || [])
+    .order('created_at', { ascending: true});
+
   currentProject = project;
   assumptions = savedAssumptions || [];
   challenges = savedChallenges || [];
+  hypotheses = savedHypotheses || [];
 
   currentView = 'project';
   renderProject(savedScenarios?.[0] || null);
@@ -272,15 +281,30 @@ async function renderProject(savedScenario: any = null) {
 
   // Prepare assumptions HTML
   const assumptionsHTML = assumptions.length > 0
-    ? assumptions.map((a: any) => `
-        <div class="border-l-4 border-${a.category === 'desirability' ? 'blue' : a.category === 'feasibility' ? 'green' : 'yellow'}-500 pl-3 py-2">
+    ? assumptions.map((a: any) => {
+        const hasHypothesis = hypotheses.some((h: any) => h.assumption_id === a.id);
+        return `
+        <div class="border-l-4 border-${a.category === 'desirability' ? 'blue' : a.category === 'feasibility' ? 'green' : 'yellow'}-500 pl-3 py-2 mb-3">
           <p class="font-medium text-gray-800">${a.text}</p>
-          <div class="flex gap-4 text-xs text-gray-600 mt-1">
-            <span>Criticality: ${a.criticality}/5</span>
-            <span>Confidence: ${a.confidence}/5</span>
+          <div class="flex justify-between items-center mt-2">
+            <div class="flex gap-4 text-xs text-gray-600">
+              <span>Criticality: ${a.criticality}/5</span>
+              <span>Confidence: ${a.confidence}/5</span>
+            </div>
+            ${!hasHypothesis ? `
+              <button
+                class="convert-hypothesis-btn text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 transition"
+                data-assumption-id="${a.id}"
+                data-assumption-text="${a.text.replace(/"/g, '&quot;')}"
+              >
+                → Hypothesis
+              </button>
+            ` : `
+              <span class="text-xs text-green-600">✓ Hypothesis created</span>
+            `}
           </div>
         </div>
-      `).join('')
+      `}).join('')
     : 'Click "Extract Assumptions" to begin';
 
   // Prepare challenges HTML
@@ -317,7 +341,46 @@ async function renderProject(savedScenario: any = null) {
       `
     : '';
 
-  const hasResults = challengesHTML || scenarioHTML;
+  // Prepare hypotheses HTML
+  const hypothesesHTML = hypotheses.length > 0
+    ? `
+        <h4 class="font-semibold text-gray-800 mb-3">Hypotheses to Test (${hypotheses.length})</h4>
+        <div class="space-y-4">
+          ${hypotheses.map((h: any) => `
+            <div class="border border-gray-200 rounded-lg p-4 bg-white">
+              <div class="flex justify-between items-start mb-2">
+                <p class="font-medium text-gray-900">${h.statement}</p>
+                <select
+                  class="hypothesis-status-select text-xs px-2 py-1 border rounded"
+                  data-hypothesis-id="${h.id}"
+                >
+                  <option value="not_tested" ${h.status === 'not_tested' ? 'selected' : ''}>Not Tested</option>
+                  <option value="in_progress" ${h.status === 'in_progress' ? 'selected' : ''}>Testing</option>
+                  <option value="validated" ${h.status === 'validated' ? 'selected' : ''}>✓ Validated</option>
+                  <option value="invalidated" ${h.status === 'invalidated' ? 'selected' : ''}>✗ Invalidated</option>
+                </select>
+              </div>
+              <div class="grid grid-cols-2 gap-3 mt-3 text-sm">
+                <div>
+                  <span class="font-semibold text-gray-700">Metric:</span>
+                  <p class="text-gray-600">${h.metric}</p>
+                </div>
+                <div>
+                  <span class="font-semibold text-gray-700">Success Criteria:</span>
+                  <p class="text-gray-600">${h.success_criteria}</p>
+                </div>
+              </div>
+              <div class="mt-3 text-sm">
+                <span class="font-semibold text-gray-700">Test Suggestion:</span>
+                <p class="text-gray-600">${h.test_suggestion}</p>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `
+    : '';
+
+  const hasResults = challengesHTML || scenarioHTML || hypothesesHTML;
 
   app.innerHTML = `
     <div class="min-h-screen bg-gray-50">
@@ -369,6 +432,8 @@ async function renderProject(savedScenario: any = null) {
             <div id="analysis-results" class="bg-white rounded-lg shadow p-6 ${hasResults ? '' : 'hidden'}">
               <h3 class="text-lg font-semibold mb-4">Analysis Results</h3>
               <div id="results-content">
+                ${hypothesesHTML}
+                ${hypothesesHTML && (challengesHTML || scenarioHTML) ? '<div class="my-6 border-t border-gray-200"></div>' : ''}
                 ${challengesHTML}
                 ${challengesHTML && scenarioHTML ? '<div class="my-6 border-t border-gray-200"></div>' : ''}
                 ${scenarioHTML}
@@ -384,6 +449,32 @@ async function renderProject(savedScenario: any = null) {
   document.getElementById('extract-assumptions-btn')?.addEventListener('click', extractAssumptionsHandler);
   document.getElementById('generate-challenges-btn')?.addEventListener('click', generateChallengesHandler);
   document.getElementById('generate-premortem-btn')?.addEventListener('click', generatePreMortemHandler);
+
+  // Add event listeners for "Convert to Hypothesis" buttons
+  document.querySelectorAll('.convert-hypothesis-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const target = e.target as HTMLButtonElement;
+      const assumptionId = target.dataset.assumptionId;
+      const assumptionText = target.dataset.assumptionText;
+
+      if (assumptionId && assumptionText) {
+        await convertToHypothesis(assumptionId, assumptionText);
+      }
+    });
+  });
+
+  // Add event listeners for hypothesis status changes
+  document.querySelectorAll('.hypothesis-status-select').forEach(select => {
+    select.addEventListener('change', async (e) => {
+      const target = e.target as HTMLSelectElement;
+      const hypothesisId = target.dataset.hypothesisId;
+      const newStatus = target.value;
+
+      if (hypothesisId) {
+        await updateHypothesisStatus(hypothesisId, newStatus);
+      }
+    });
+  });
 }
 
 async function extractAssumptionsHandler() {
@@ -467,6 +558,71 @@ async function generatePreMortemHandler() {
     alert('Error generating pre-mortem. Make sure the backend server is running.');
   } finally {
     if (btn) btn.textContent = 'Pre-Mortem Analysis';
+  }
+}
+
+async function convertToHypothesis(assumptionId: string, assumptionText: string) {
+  try {
+    // Generate hypothesis using AI
+    const hypothesisData = await api.generateHypothesis(assumptionText, currentProject.strategy_text);
+
+    // Save to database
+    const { data: newHypothesis, error } = await supabase
+      .from('hypotheses')
+      .insert({
+        assumption_id: assumptionId,
+        statement: hypothesisData.statement,
+        metric: hypothesisData.metric,
+        success_criteria: hypothesisData.success_criteria,
+        test_suggestion: hypothesisData.test_suggestion,
+        status: 'not_tested'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error saving hypothesis:', error);
+      alert('Error saving hypothesis');
+      return;
+    }
+
+    // Add to local state
+    hypotheses.push(newHypothesis);
+
+    // Refresh UI
+    renderProject();
+  } catch (error) {
+    console.error('Error creating hypothesis:', error);
+    alert('Error creating hypothesis. Make sure the backend server is running.');
+  }
+}
+
+async function updateHypothesisStatus(hypothesisId: string, newStatus: string) {
+  try {
+    const { error } = await supabase
+      .from('hypotheses')
+      .update({
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', hypothesisId);
+
+    if (error) {
+      console.error('Error updating hypothesis:', error);
+      alert('Error updating hypothesis status');
+      return;
+    }
+
+    // Update local state
+    const hypothesis = hypotheses.find((h: any) => h.id === hypothesisId);
+    if (hypothesis) {
+      hypothesis.status = newStatus;
+    }
+
+    console.log(`Hypothesis status updated to: ${newStatus}`);
+  } catch (error) {
+    console.error('Error updating hypothesis:', error);
+    alert('Error updating hypothesis status');
   }
 }
 

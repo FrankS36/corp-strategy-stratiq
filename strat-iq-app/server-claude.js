@@ -120,10 +120,56 @@ Return ONLY valid JSON with this structure, no markdown:
   return JSON.parse(cleaned);
 }
 
+async function generateHypothesis(assumptionText, strategyContext) {
+  const prompt = `You are a strategy consultant helping convert an assumption into a testable hypothesis.
+
+Strategy Context:
+${strategyContext}
+
+Assumption to Test:
+"${assumptionText}"
+
+Convert this assumption into a testable hypothesis with:
+1. A clear hypothesis statement (specific, measurable claim)
+2. The key metric to measure
+3. Success criteria (what would validate this hypothesis)
+4. A practical test/experiment suggestion to validate it
+
+Return ONLY valid JSON with this structure, no markdown:
+{
+  "statement": "Clear testable hypothesis statement",
+  "metric": "Specific metric to measure",
+  "success_criteria": "What result would validate this",
+  "test_suggestion": "Practical way to test this hypothesis"
+}
+
+Example:
+Assumption: "Customers will pay 20% more for premium features"
+{
+  "statement": "At least 15% of our current users will upgrade to the premium tier at a 20% price increase within 3 months",
+  "metric": "Premium tier conversion rate",
+  "success_criteria": "Achieve 15%+ conversion rate with <10% churn",
+  "test_suggestion": "Run a 30-day A/B test offering premium features to 20% of users at the new price point and measure conversion and retention rates"
+}`;
+
+  const message = await anthropic.messages.create({
+    model: 'claude-3-5-sonnet-20241022',
+    max_tokens: 1024,
+    messages: [{
+      role: 'user',
+      content: prompt
+    }]
+  });
+
+  const content = message.content[0].text;
+  const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  return JSON.parse(cleaned);
+}
+
 // Routes
 app.post('/api', async (req, res) => {
   try {
-    const { endpoint, strategyText, assumptions } = req.body;
+    const { endpoint, strategyText, assumptions, assumptionText, strategyContext } = req.body;
 
     console.log(`[API] ${endpoint} request received`);
 
@@ -151,6 +197,14 @@ app.post('/api', async (req, res) => {
         const preMortem = await generatePreMortem(strategyText, assumptions || []);
         console.log(`[API] ✅ Generated pre-mortem analysis`);
         return res.status(200).json(preMortem);
+
+      case 'hypothesis':
+        if (!assumptionText || !strategyContext) {
+          return res.status(400).json({ error: 'Assumption text and strategy context are required' });
+        }
+        const hypothesis = await generateHypothesis(assumptionText, strategyContext);
+        console.log(`[API] ✅ Generated hypothesis for assumption`);
+        return res.status(200).json(hypothesis);
 
       default:
         return res.status(400).json({ error: 'Invalid endpoint' });
